@@ -31,6 +31,7 @@ FONDO = colors.HexColor("#eff5f6")
 TSPLIB = "https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/tspindex.html"
 OPTIMOS = "https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/TSP-BEST.html"
 FAQ = "https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/tsp/TSPFAQ.html"
+REPOSITORIO = "https://github.com/iancumes/modelacion-tsp"
 
 
 def fuentes():
@@ -173,6 +174,8 @@ def informe(resultados):
     b = resultados[1]
     d.texto(f'El GA igualó el óptimo en <b>eil101</b> y <b>Volcán 72</b>. Su mejor ruta para <b>gr229</b> quedó a <b>{num(ga1(b)["error_pct"], 3)} %</b> del óptimo. PuLP y HiGHS certificaron las tres distancias de referencia.', tam=11.5, despues=20)
     d.nota("Las distancias se leen en la unidad de cada instancia. Las brechas porcentuales toman como referencia el óptimo de la misma instancia.")
+    d.sub("Código fuente y reproducción")
+    d.texto(enlace("github.com/iancumes/modelacion-tsp", REPOSITORIO))
 
     d.pagina("Escenarios y metodología", "Datos y diseño experimental")
     d.tabla(["Escenario", "Nodos", "Métrica", "Referencia externa"],
