@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>El problema del viajante · Visor de resultados</title>
+<style>
+:root{color-scheme:light;--ink:#172d42;--muted:#526779;--line:#dbe4eb;--teal:#087e8b;--rust:#ab512d;--paper:#fff;--base:#f2f6f7}
+*{box-sizing:border-box}body{margin:0;background:var(--base);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{max-width:1120px;padding:40px 24px;margin:auto}header{padding:0 0 28px;border-bottom:1px solid var(--line)}
+h1{font-size:clamp(2rem,5vw,3.8rem);line-height:1.04;letter-spacing:-.052em;margin:0 0 12px}p{margin:.35rem 0;color:var(--muted)}
+.controles{display:flex;flex-wrap:wrap;align-items:end;gap:14px;margin:24px 0 16px}.controles label{display:grid;gap:6px}
+label{font-size:.86rem;font-weight:650}select,button{border:1px solid #b3c5cd;border-radius:7px;padding:8px 12px;min-height:42px;font:inherit;color:inherit;background:white}
+button{cursor:pointer}.principal{background:var(--teal);border-color:var(--teal);color:white;font-weight:700;min-width:124px}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #edab6c;outline-offset:2px}button:disabled{opacity:.5;cursor:default}
+.panel{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:19px;margin-bottom:16px}
+.rejilla{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:16px}.titulo{font-size:1.1rem;margin:0 0 2px}
+.cifra{font-size:2.5rem;line-height:1.1;font-weight:750;letter-spacing:-.045em;color:var(--teal);margin:.5rem 0 .25rem}
+canvas{display:block;width:100%;height:345px}#curva{height:174px;margin-top:10px}
+.botonera{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.deslizador{display:grid;gap:6px;margin-top:14px}input{width:100%;accent-color:var(--teal)}
+.nota{font-size:.84rem}.tabla{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+th,td{padding:9px 10px;border-bottom:1px solid var(--line)}th{font-size:.82rem;color:var(--muted)}td:first-child,th:first-child{text-align:left}tr:last-child td{border-bottom:0}
+[hidden]{display:none!important}@media(max-width:750px){main{padding:28px 14px}.rejilla{grid-template-columns:1fr}canvas{height:300px}.panel{padding:14px}}
+</style>
+<main>
+  <header>
+    <h1>El problema del viajante</h1>
+    <p>Compara las rutas finales y reproduce la evolución del algoritmo genético.</p>
+  </header>
+  <section class="controles" aria-label="Selección de datos">
+    <label>Escenario<select id="escenario"></select></label>
+    <label>Vista<select id="modo"></select></label>
+    <label id="control-semilla">Semilla GA<select id="semilla"></select></label>
+  </section>
+  <section class="rejilla" aria-label="Visualización de rutas">
+    <div class="panel">
+      <h2 class="titulo" id="titulo-mapa">Ruta</h2>
+      <canvas id="mapa" role="img" aria-label="Mapa del recorrido que une todas las ciudades"></canvas>
+      <p class="nota" id="nota-mapa"></p>
+    </div>
+    <div class="panel">
+      <h2 class="titulo" id="titulo-metrica">Distancia del ciclo</h2>
+      <div id="distancia" class="cifra"></div>
+      <p id="contexto" aria-live="polite"></p>
+      <div id="animacion">
+        <canvas id="curva" role="img" aria-label="Distancia de la mejor ruta por generación"></canvas>
+        <div class="botonera">
+          <button id="reproducir" class="principal">Reproducir</button>
+          <button id="anterior" aria-label="Generación anterior">−</button>
+          <button id="siguiente" aria-label="Siguiente generación">+</button>
+        </div>
+        <label class="deslizador"><span id="etiqueta-generacion">Generación</span><input type="range" id="generacion" min="0" value="0" aria-label="Generación del algoritmo"></label>
+      </div>
+    </div>
+  </section>
+  <section class="panel tabla">
+    <h2 class="titulo">Comparación de resultados</h2>
+    <p id="modelo" class="nota"></p>
+    <table aria-label="Distancias, tiempos y error"><thead><tr><th>Método</th><th>Semilla</th><th>Tiempo (s)</th><th>Óptimo</th><th>Distancia</th><th>Error (%)</th></tr></thead><tbody id="filas"></tbody></table>
+  </section>
+</main>
+<script>
+const datos = /* DATOS */ null;
+const $ = id => document.getElementById(id);
+const nfmt = (n, digitos = 0) => n == null ? '—' : new Intl.NumberFormat('es-GT', {maximumFractionDigits: digitos, minimumFractionDigits: digitos}).format(n);
+const nombres = {volcan72: 'Volcán 72', eil101: 'eil101', gr229: 'gr229'};
+const colorGA = '#087e8b', colorLP = '#ab512d', tinta = '#172d42', gris = '#526779', grilla = '#dbe4eb';
+let actual, corrida, cronometro;
+
+function opcion(valor, etiqueta) { return new Option(etiqueta, valor); }
+function nombreFila(f) { return f.metodo === 'LP' ? 'LP · óptimo certificado' : `GA · puesto ${f.puesto}`; }
+function detener() { clearInterval(cronometro); cronometro = undefined; $('reproducir').textContent = 'Reproducir'; }
+function ajustarCanvas(id) {
+  const c = $(id), w = c.clientWidth, h = c.clientHeight, escala = window.devicePixelRatio || 1;
+  if (!w || !h) return null;
+  c.width = Math.round(w * escala); c.height = Math.round(h * escala);
+  const ctx = c.getContext('2d'); ctx.scale(escala, escala);
+  ctx.font = '12px system-ui, sans-serif';
+  return {ctx, w, h};
+}
+
+function mapa(orden, color) {
+  const lienzo = ajustarCanvas('mapa'); if (!lienzo) return;
+  const {ctx, w, h} = lienzo, xy = actual.xy, geo = actual.metrica === 'GEO';
+  const xs = xy.map(p => p[0]), ys = xy.map(p => p[1]);
+  const minimoX = Math.min(...xs), maximoX = Math.max(...xs), minimoY = Math.min(...ys), maximoY = Math.max(...ys);
+  const escala = Math.min((w-52)/(maximoX-minimoX || 1), (h-54)/(maximoY-minimoY || 1));
+  const proyectar = ([x,y]) => [w/2+(x-(maximoX+minimoX)/2)*escala, h/2-(y-(maximoY+minimoY)/2)*escala];
+  ctx.strokeStyle = grilla; ctx.lineWidth = 1; ctx.beginPath();
+  for (let i = 1; i < 8; i++) { ctx.moveTo(w*i/8, 8); ctx.lineTo(w*i/8,h-8); }
+  for (let i = 1; i < 6; i++) { ctx.moveTo(8,h*i/6); ctx.lineTo(w-8,h*i/6); }
+  ctx.stroke();
+  if (orden) {
+    const cerrada = [...orden, orden[0]];
+    ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 1.65;
+    cerrada.forEach((ciudad,i) => {
+      const xyPantalla = proyectar(xy[ciudad]);
+      if (!i || (geo && Math.abs(xy[ciudad][0]-xy[cerrada[i-1]][0]) > 180)) ctx.moveTo(...xyPantalla);
+      else ctx.lineTo(...xyPantalla);
+    });
+    ctx.stroke();
+  }
+  xy.forEach((p,i) => {
+    ctx.beginPath(); ctx.arc(...proyectar(p), i === orden?.[0] ? 4.8 : 2.35, 0, 2*Math.PI);
+    ctx.fillStyle = i === orden?.[0] ? color : tinta; ctx.fill();
+  });
+  $('nota-mapa').textContent = geo ? 'Vista centrada en 130° E. La distancia se calcula con la métrica GEO de TSPLIB.' : 'Coordenadas del escenario. El punto de color marca el inicio y cierre del ciclo.';
+}
+
+function curva(historial, generacion) {
+  const lienzo = ajustarCanvas('curva'); if (!lienzo) return;
+  const {ctx, w, h} = lienzo, minimo = historial.at(-1).mejor, maximo = historial[0].mejor;
+  const x = g => 48 + (w - 60) * g / (historial.length - 1);
+  const y = d => 15 + (h - 53) * (maximo - d) / (maximo - minimo || 1);
+  ctx.strokeStyle = grilla; ctx.beginPath(); ctx.moveTo(x(0),11); ctx.lineTo(x(0),h-26); ctx.lineTo(w-10,h-26); ctx.stroke();
+  ctx.fillStyle = gris; ctx.fillText(nfmt(maximo), 0, 17);
+  if (minimo !== maximo) ctx.fillText(nfmt(minimo), 0, h-33);
+  ctx.fillText('G0', x(0), h-7); ctx.textAlign = 'right'; ctx.fillText(`G${historial.length-1}`, w-10, h-7);
+  ctx.strokeStyle = colorGA; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x(0),y(maximo));
+  for (let i=1; i<historial.length; i++) { ctx.lineTo(x(i), y(historial[i-1].mejor)); ctx.lineTo(x(i), y(historial[i].mejor)); }
+  ctx.stroke();
+  ctx.fillStyle = colorLP; ctx.beginPath(); ctx.arc(x(generacion), y(historial[generacion].mejor), 4.5, 0, 2*Math.PI); ctx.fill();
+}
+
+function dibujar() {
+  const animar = $('modo').value === 'ga';
+  $('animacion').hidden = $('control-semilla').hidden = !animar;
+  if (animar) {
+    const gen = +$('generacion').value, h = corrida.historial[gen];
+    const f = corrida.instantaneas.findLast(r => r.generacion <= gen);
+    $('titulo-mapa').textContent = 'Mejor ruta acumulada';
+    $('distancia').textContent = nfmt(f.D);
+    $('contexto').textContent = `Diversidad de aristas ${nfmt(100*h.diversidad,1)}%.`;
+    $('etiqueta-generacion').textContent = `Generación ${gen} de ${corrida.historial.length-1}`;
+    $('generacion').setAttribute('aria-valuetext', $('etiqueta-generacion').textContent);
+    $('anterior').disabled = gen === 0;
+    $('siguiente').disabled = gen === corrida.historial.length - 1;
+    mapa(f.ruta, colorGA); curva(corrida.historial, gen);
+  } else {
+    const f = actual.filas[+$('modo').value];
+    $('titulo-mapa').textContent = nombreFila(f);
+    $('distancia').textContent = nfmt(f.distancia);
+    $('contexto').textContent = f.metodo === 'LP' ? actual.lp.estado : `Semilla ${f.semilla}${f.error_pct == null ? '' : ` · brecha ${nfmt(f.error_pct,3)}%`}`;
+    mapa(f.ruta, f.metodo === 'LP' ? colorLP : colorGA);
+  }
+}
+
+function seleccionarSemilla() {
+  detener();
+  corrida = actual.ga.find(r => r.semilla === +$('semilla').value);
+  $('generacion').max = corrida ? corrida.historial.length - 1 : 0;
+  $('generacion').value = 0;
+  dibujar();
+}
+
+function seleccionarEscenario() {
+  actual = datos[+$('escenario').value];
+  $('modo').replaceChildren(...(actual.ga.length ? [opcion('ga','Evolución del GA')] : []), ...actual.filas.map((f,i) => opcion(i,nombreFila(f))));
+  $('semilla').replaceChildren(...actual.ga.map(f => opcion(f.semilla, f.semilla)));
+  if (actual.ga.length) $('semilla').value = actual.semilla_ilustrada;
+  const ga = actual.config, lp = actual.lp;
+  $('modelo').textContent = [`${actual.ids.length} ciudades`, ga && `GA: N = ${ga.poblacion}, ${ga.iteraciones} generaciones`, lp && `LP: ${nfmt(lp.variables)} variables, ${nfmt(lp.restricciones)} restricciones`].filter(Boolean).join(' · ');
+  $('filas').replaceChildren(...actual.filas.map(f => {
+    const fila = document.createElement('tr');
+    for (const valor of [nombreFila(f),nfmt(f.semilla),nfmt(f.segundos,3),nfmt(f.optimo),nfmt(f.distancia),nfmt(f.error_pct,3)]) {
+      const celda = fila.insertCell(); celda.textContent = valor;
+    }
+    return fila;
+  }));
+  seleccionarSemilla();
+}
+
+function cambiar(paso) {
+  $('generacion').value = Math.max(0, Math.min(+$('generacion').max, +$('generacion').value + paso));
+  dibujar();
+}
+$('escenario').replaceChildren(...datos.map((r,i) => opcion(i,nombres[r.nombre] ?? r.nombre)));
+$('escenario').onchange = seleccionarEscenario;
+$('semilla').onchange = seleccionarSemilla;
+$('modo').onchange = () => { detener(); dibujar(); };
+$('generacion').oninput = () => { detener(); dibujar(); };
+$('anterior').onclick = () => { detener(); cambiar(-1); };
+$('siguiente').onclick = () => { detener(); cambiar(1); };
+$('reproducir').onclick = () => {
+  if (cronometro) { detener(); return; }
+  if ($('generacion').value === $('generacion').max) { $('generacion').value = 0; dibujar(); }
+  $('reproducir').textContent = 'Pausar';
+  cronometro = setInterval(() => {
+    cambiar(Math.max(1, Math.round(+$('generacion').max / 85)));
+    if ($('generacion').value === $('generacion').max) detener();
+  }, 110);
+};
+window.addEventListener('resize', dibujar);
+seleccionarEscenario();
+</script>
+</html>
